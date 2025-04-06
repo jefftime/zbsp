@@ -150,8 +150,10 @@ pub fn scan_buf(
                                 continue :state .number;
                             }
                         },
-                        else => continue :state .sym,
+                        else => {},
                     }
+
+                    continue :state .sym;
                 },
 
                 else => {
@@ -422,4 +424,29 @@ test "negative float leading period" {
     try std.testing.expect(
         tokens.items[0].float - (-0.123) <= std.math.floatEps(f32),
     );
+}
+
+test "remove double slash comments" {
+    const input =
+        \\// this is a comment
+        \\something
+    ;
+    const al = std.testing.allocator;
+    var tokens = try scan_buf(al, input, .{ .double_slash_comments = true });
+    defer tokens.deinit(al);
+    try std.testing.expectEqual(1, tokens.items.len);
+    try std.testing.expectEqualStrings("something", tokens.items[0].ident);
+}
+
+test "do not remove double slash comments" {
+    const input =
+        \\//comment
+    ;
+    const al = std.testing.allocator;
+    var tokens = try scan_buf(al, input, .{});
+    defer tokens.deinit(al);
+    try std.testing.expectEqual(3, tokens.items.len);
+    try std.testing.expectEqual('/', tokens.items[0].sym);
+    try std.testing.expectEqual('/', tokens.items[1].sym);
+    try std.testing.expectEqualStrings("comment", tokens.items[2].ident);
 }
