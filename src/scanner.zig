@@ -1,4 +1,5 @@
 const std = @import("std");
+const util = @import("util.zig");
 
 pub const ScanOptions = packed struct(u4) {
     double_slash_comments: bool = false,
@@ -11,8 +12,8 @@ pub const TokenType = enum { ident, string, float, number, sym, unknown };
 pub const Token = union(TokenType) {
     ident: []const u8,
     string: []const u8,
-    float: []const u8,
-    number: []const u8,
+    float: f32,
+    number: i32,
     sym: u8,
     unknown: u8,
 
@@ -20,8 +21,8 @@ pub const Token = union(TokenType) {
         switch (self.*) {
             .ident => |val| std.log.info("IDENT   : {s}", .{val}),
             .string => |val| std.log.info("STRING  : {s}", .{val}),
-            .float => |val| std.log.info("FLOAT   : {s}", .{val}),
-            .number => |val| std.log.info("NUMBER  : {s}", .{val}),
+            .float => |val| std.log.info("FLOAT   : {}", .{val}),
+            .number => |val| std.log.info("NUMBER  : {}", .{val}),
             .sym => |c| std.log.info("SYM     : {c}", .{c}),
             .unknown => |c| std.log.info("UNKNOWN : {}", .{c}),
         }
@@ -189,31 +190,28 @@ pub fn scan_buf(
             var T: TokenType = if (curtk == '.') .float else .number;
 
             number: while (scanner.peek()) |ch| {
+                if (!(isdigit(ch) or ch == '.')) break :number;
+
+                if (ch == '.' and oneperiod) break :number;
                 if (ch == '.' and !oneperiod) {
                     oneperiod = true;
                     T = .float;
-                    _ = scanner.pop();
-                    continue :number;
-                } else if (ch == '.' and oneperiod) {
-                    break :number;
                 }
 
-                if (isdigit(ch)) {
-                    _ = scanner.pop();
-                    continue :number;
-                }
-
-                break :number;
+                _ = scanner.pop();
             }
 
             var result: Token = undefined;
             switch (T) {
-                .float => result = .{
-                    .float = scanner.slice(curpos, scanner.pos()),
-                },
-                .number => result = .{
-                    .number = scanner.slice(curpos, scanner.pos()),
-                },
+                .number => result = .{ .number = try std.fmt.parseInt(
+                    i32,
+                    scanner.slice(curpos, scanner.pos()),
+                    10,
+                ) },
+                .float => result = .{ .float = try std.fmt.parseFloat(
+                    f32,
+                    scanner.slice(curpos, scanner.pos()),
+                ) },
                 // Unreachable?
                 else => return error.NumberParse,
             }
@@ -355,7 +353,7 @@ test "number" {
     var tokens = try scan_buf(al, input, .{});
     defer tokens.deinit(al);
     try std.testing.expectEqual(1, tokens.items.len);
-    try std.testing.expectEqualStrings("1234", tokens.items[0].number);
+    try std.testing.expectEqual(1234, tokens.items[0].number);
 }
 
 test "negative number" {
@@ -364,7 +362,7 @@ test "negative number" {
     var tokens = try scan_buf(al, input, .{});
     defer tokens.deinit(al);
     try std.testing.expectEqual(1, tokens.items.len);
-    try std.testing.expectEqualStrings("-1234", tokens.items[0].number);
+    try std.testing.expectEqual(-1234, tokens.items[0].number);
 }
 
 test "float" {
@@ -373,7 +371,9 @@ test "float" {
     var tokens = try scan_buf(al, input, .{});
     defer tokens.deinit(al);
     try std.testing.expectEqual(1, tokens.items.len);
-    try std.testing.expectEqualStrings("1.23", tokens.items[0].float);
+    try std.testing.expect(
+        tokens.items[0].float - 1.23 <= std.math.floatEps(f32),
+    );
 }
 
 test "negative float" {
@@ -383,7 +383,9 @@ test "negative float" {
     var tokens = try scan_buf(al, input, .{});
     defer tokens.deinit(al);
     try std.testing.expectEqual(1, tokens.items.len);
-    try std.testing.expectEqualStrings("-1.23", tokens.items[0].float);
+    try std.testing.expect(
+        tokens.items[0].float - (-1.23) <= std.math.floatEps(f32),
+    );
 }
 
 test "float leading period" {
@@ -392,7 +394,9 @@ test "float leading period" {
     var tokens = try scan_buf(al, input, .{});
     defer tokens.deinit(al);
     try std.testing.expectEqual(1, tokens.items.len);
-    try std.testing.expectEqualStrings(".123", tokens.items[0].float);
+    try std.testing.expect(
+        tokens.items[0].float - 0.123 <= std.math.floatEps(f32),
+    );
 }
 
 test "two floats no spaces" {
@@ -401,8 +405,12 @@ test "two floats no spaces" {
     var tokens = try scan_buf(al, input, .{});
     defer tokens.deinit(al);
     try std.testing.expectEqual(2, tokens.items.len);
-    try std.testing.expectEqualStrings("1.23", tokens.items[0].float);
-    try std.testing.expectEqualStrings(".456", tokens.items[1].float);
+    try std.testing.expect(
+        tokens.items[0].float - 1.23 <= std.math.floatEps(f32),
+    );
+    try std.testing.expect(
+        tokens.items[1].float - 0.456 <= std.math.floatEps(f32),
+    );
 }
 
 test "negative float leading period" {
@@ -411,5 +419,7 @@ test "negative float leading period" {
     var tokens = try scan_buf(al, input, .{});
     defer tokens.deinit(al);
     try std.testing.expectEqual(1, tokens.items.len);
-    try std.testing.expectEqualStrings("-.123", tokens.items[0].float);
+    try std.testing.expect(
+        tokens.items[0].float - (-0.123) <= std.math.floatEps(f32),
+    );
 }
