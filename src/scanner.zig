@@ -27,6 +27,75 @@ pub const Token = union(TokenType) {
             .unknown => |c| std.log.info("UNKNOWN : {}", .{c}),
         }
     }
+
+    pub fn eql(self: *const Token, t: Token) bool {
+        const activeTag = std.meta.activeTag;
+        const mem = std.mem;
+        switch (self.*) {
+            .ident => |val| return activeTag(t) == .ident and mem.eql(
+                u8,
+                val,
+                t.ident,
+            ),
+            .string => |val| return activeTag(t) == .string and mem.eql(
+                u8,
+                val,
+                t.string,
+            ),
+            .float => |val| return activeTag(t) == .float and val == t.float,
+            .number => |val| return activeTag(t) == .number and val == t.number,
+            .sym => |val| return activeTag(t) == .sym and val == t.sym,
+            .unknown => |val| {
+                return activeTag(t) == .unknown and val == t.unknown;
+            },
+        }
+    }
+};
+
+// TODO: Merge this and `Scanner` into single type
+pub const TokenScanner = struct {
+    tokens: []const Token,
+
+    const TokenScannerError = error{ EndOfStream, TokenMismatch };
+
+    pub fn init(tokens: []const Token) TokenScanner {
+        return .{ .tokens = tokens };
+    }
+
+    pub fn pop(self: *TokenScanner) ?Token {
+        if (self.tokens.len == 0) return null;
+
+        const result = self.tokens[0];
+        self.tokens = self.tokens[1..];
+        return result;
+    }
+
+    pub fn peek(self: *TokenScanner) ?Token {
+        return if (self.tokens.len == 0) null else self.tokens[0];
+    }
+
+    pub fn match(self: *TokenScanner, T: TokenType) bool {
+        return if (self.tokens.len == 0)
+            false
+        else
+            std.meta.activeTag(self.tokens[0]) == T;
+    }
+
+    pub fn expect_sym(self: *TokenScanner, ch: u8) TokenScannerError!void {
+        const result = try self.expect(.sym);
+        switch (result) {
+            .sym => |sym| if (sym != ch) {
+                return TokenScannerError.TokenMismatch;
+            },
+            else => return TokenScannerError.TokenMismatch,
+        }
+    }
+
+    pub fn expect(self: *TokenScanner, T: TokenType) TokenScannerError!Token {
+        if (!self.match(T)) return TokenScannerError.TokenMismatch;
+
+        return self.pop() orelse TokenScannerError.EndOfStream;
+    }
 };
 
 const State = enum {
@@ -45,7 +114,6 @@ const Scanner = struct {
     buf: []const u8,
 
     pub fn init(buf: []const u8) Scanner {
-        std.log.info("buf.len: {}", .{buf.len});
         return .{
             .bufstart = buf.ptr,
             .buf = buf,
@@ -116,24 +184,24 @@ pub fn scan_buf(
                         '/' => {
                             if (!opts.double_slash_comments) break :innersym;
                             if (scanner.peek() != '/') break :innersym;
-                            com: while (scanner.peek()) |ch| {
-                                if (ch == '\n') break :com;
+                            blk: while (scanner.peek()) |ch| {
+                                if (ch == '\n') break :blk;
                                 _ = scanner.pop();
                             }
                             continue :state .readchar;
                         },
                         '#' => {
                             if (!opts.hashtag_comments) break :innersym;
-                            com: while (scanner.peek()) |ch| {
-                                if (ch == '\n') break :com;
+                            blk: while (scanner.peek()) |ch| {
+                                if (ch == '\n') break :blk;
                                 _ = scanner.pop();
                             }
                             continue :state .readchar;
                         },
                         ';' => {
                             if (!opts.semicolon_comments) break :innersym;
-                            com: while (scanner.peek()) |ch| {
-                                if (ch == '\n') break :com;
+                            blk: while (scanner.peek()) |ch| {
+                                if (ch == '\n') break :blk;
                                 _ = scanner.pop();
                             }
                         },
@@ -242,6 +310,7 @@ pub fn scan_buf(
         .end => break :state,
     }
 
+    tokens.shrinkAndFree(al, tokens.items.len);
     return tokens;
 }
 
@@ -449,4 +518,18 @@ test "do not remove double slash comments" {
     try std.testing.expectEqual('/', tokens.items[0].sym);
     try std.testing.expectEqual('/', tokens.items[1].sym);
     try std.testing.expectEqualStrings("comment", tokens.items[2].ident);
+}
+
+test "expect_sym valid" {
+    const tk = Token{ .sym = '(' };
+    var scanner = TokenScanner.init(&[_]Token{tk});
+    try scanner.expect_sym('(');
+    // We want to make sure we get to this line
+    try std.testing.expect(true);
+}
+
+test "expect_sym invalid" {
+    const tk = Token{ .sym = '{' };
+    var scanner = TokenScanner.init(&[_]Token{tk});
+    try std.testing.expectError(error.TokenMismatch, scanner.expect_sym('!'));
 }
