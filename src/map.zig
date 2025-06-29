@@ -119,7 +119,7 @@ fn brush(
     plane: switch (tks.peek() orelse return error.InvalidToken) {
         .sym => |s| switch (s) {
             '(' => {
-                try planes.append(al, try plane(tks));
+                try planes.append(al, try plane(al, tks));
                 continue :plane tks.peek() orelse return error.EndOfStream;
             },
             '}' => {
@@ -144,7 +144,7 @@ fn float_or_number(tks: *scanner.TokenScanner) !f32 {
     };
 }
 
-fn plane(tks: *scanner.TokenScanner) !Map.Plane {
+fn plane(al: std.mem.Allocator, tks: *scanner.TokenScanner) !Map.Plane {
     var result: Map.Plane = undefined;
 
     try tks.expect_sym('(');
@@ -169,13 +169,10 @@ fn plane(tks: *scanner.TokenScanner) !Map.Plane {
     };
     try tks.expect_sym(')');
 
-    switch (tks.pop() orelse return error.EndOfStream) {
-        .ident => |ident| result.texname = ident,
+    switch (tks.peek() orelse return error.EndOfStream) {
+        .ident, .sym => result.texname = try path(al, tks),
         .string => |str| result.texname = str,
-        else => {
-            std.log.info("??", .{});
-            return error.InvalidToken;
-        },
+        else => return error.InvalidToken,
     }
 
     try tks.expect_sym('[');
@@ -201,4 +198,30 @@ fn plane(tks: *scanner.TokenScanner) !Map.Plane {
     result.v_scale = try float_or_number(tks);
 
     return result;
+}
+
+fn path(al: std.mem.Allocator, tks: *scanner.TokenScanner) ![]const u8 {
+    var pathstr = try std.ArrayListUnmanaged(u8).initCapacity(al, 64);
+    tk: switch (tks.peek() orelse return "") {
+        .ident => |ident| {
+            try pathstr.appendSlice(al, ident);
+
+            _ = tks.pop();
+            continue :tk tks.peek() orelse break :tk;
+        },
+
+        .sym => |sym| {
+            // TODO: Should we handle more symbols? Maybe periods?
+            if (sym != '/' and sym != '\\') break :tk;
+
+            try pathstr.append(al, sym);
+            _ = tks.pop();
+            continue :tk tks.peek() orelse break :tk;
+        },
+
+        else => break :tk,
+    }
+
+    pathstr.shrinkAndFree(al, pathstr.items.len);
+    return pathstr.items;
 }
