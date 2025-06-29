@@ -6,12 +6,12 @@ const v3 = geo.v3;
 const ParseError = error{ EndOfStream, InvalidToken };
 
 pub const Map = struct {
-    const Entity = struct {
+    pub const Entity = struct {
         properties: []const Property,
         brushes: []const Brush,
     };
     // Right now we're just supporting Valve220 brush format
-    const Plane = struct {
+    pub const Plane = struct {
         a: v3,
         b: v3,
         c: v3,
@@ -24,8 +24,8 @@ pub const Map = struct {
         u_scale: f32,
         v_scale: f32,
     };
-    const Brush = struct { planes: []Plane };
-    const Property = struct { name: []const u8, value: []const u8 };
+    pub const Brush = struct { planes: []Plane };
+    pub const Property = struct { name: []const u8, value: []const u8 };
 
     entities: []const Entity,
 
@@ -66,11 +66,7 @@ pub fn parse(al: std.mem.Allocator, tokens: []scanner.Token) !Map {
     var tks = scanner.TokenScanner.init(tokens);
     var entities = try std.ArrayListUnmanaged(Map.Entity).initCapacity(al, 128);
 
-    while (tks.peek() != null) {
-        // std.fmt.format
-        std.log.debug("peeking {c}", .{tks.peek().?.sym});
-        try entities.append(al, try entity(al, &tks));
-    }
+    while (tks.peek() != null) try entities.append(al, try entity(al, &tks));
 
     entities.shrinkAndFree(al, entities.items.len);
     return .{ .entities = entities.items };
@@ -82,7 +78,6 @@ fn entity(
 ) !Map.Entity {
     try tks.expect_sym('{');
 
-    std.log.debug("props time", .{});
     // Properties
     var properties =
         try std.ArrayListUnmanaged(Map.Property).initCapacity(al, 64);
@@ -97,7 +92,6 @@ fn entity(
     }
     properties.shrinkAndFree(al, properties.items.len);
 
-    std.log.debug("brush time", .{});
     // Brushes
     var brushes = try std.ArrayListUnmanaged(Map.Brush).initCapacity(al, 64);
     entity: while (tks.peek()) |start_token| switch (start_token) {

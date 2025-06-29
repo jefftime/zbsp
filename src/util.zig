@@ -8,6 +8,7 @@ pub fn die(err: ?anyerror, comptime fmt: []const u8, args: anytype) noreturn {
     var bw = std.io.bufferedWriter(std.io.getStdErr().writer());
     const stderr = bw.writer();
 
+    stderr.print("({?}) ", .{err}) catch quit(err);
     stderr.print(fmt, args) catch quit(err);
     stderr.print("\n", .{}) catch quit(err);
     bw.flush() catch quit(err);

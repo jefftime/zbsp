@@ -10,6 +10,15 @@
             "name": "GDB",
             "program": "${workspaceFolder}/zig-out/bin/zfp",
             "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Build (debug)",
+            "internalConsoleOptions": "openOnSessionStart"
+        },
+        {
+            "type": "gdb",
+            "request": "launch",
+            "name": "GDB (test)",
+            "program": "${workspaceFolder}/zig-out/bin/test",
+            "cwd": "${workspaceFolder}",
             "preLaunchTask": "Build (debug)"
         }
     ]
