@@ -15,7 +15,10 @@ pub fn main(_: c_int, _: [*c][*c]c_char) callconv(.c) c_int {
     defer arena_allocator.deinit();
     const al = arena_allocator.allocator();
 
-    const filepath = "data/unnamed.map";
+    // const filepath = "data/unnamed.map";
+    // const filepath = "data/mapfile.map";
+    // const filepath = "data/3cube.map";
+    const filepath = "data/cubewall.map";
     var file = std.fs.cwd().openFile(
         filepath,
         .{ .mode = .read_only },
@@ -37,7 +40,7 @@ pub fn main(_: c_int, _: [*c][*c]c_char) callconv(.c) c_int {
         "{}: Failed to parse map",
         .{err},
     );
-    m.print();
+    // m.print();
 
     const b = bsp.compile(al, m) catch |err| util.die(
         err,

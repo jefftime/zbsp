@@ -40,30 +40,28 @@ fn planes_from_brushplanes(al: std.mem.Allocator, bps: []Map.Plane) ![]Plane {
     return planes.items;
 }
 
+fn point_on_plane(pt: v3, plane: Plane) bool {
+    const eps = std.math.floatEps(f32);
+    return std.math.approxEqAbs(
+        f32,
+        plane.norm.dot(pt) + plane.offset,
+        0.0,
+        eps,
+    );
+}
+
 fn point_in_planes(pt: v3, planes: []const Plane) bool {
     var result = planes.len > 0;
-    pr("incoming pt: {d} {d} {d}\n", .{ pt.x, pt.y, pt.z });
-    for (planes, 0..) |plane, i| {
+    for (planes) |plane| {
         const eps = std.math.floatEps(f32);
         const pt_offset = plane.norm.dot(pt) + plane.offset;
-        const inside =
-            pt_offset < 0 or std.math.approxEqAbs(f32, pt_offset, 0.0, eps);
-        if (!inside) {
-            pr("plane: {}\n", .{plane});
-            pr("pt: {}\n", .{pt});
-            // pr("pt_offset: {d}\n", .{pt_offset});
-            // pr(
-            //     "plane.norm: {d} {d} {d}\n",
-            //     .{ plane.norm.x, plane.norm.y, plane.norm.z },
-            // );
-            // pr("plane.offset: {d}\n", .{plane.offset});
-            // pr("plane.norm.dot(pt): {d}\n", .{plane.norm.dot(pt)});
-            return false;
-        } else {
-            pr("plane #{}: good\n", .{i});
-        }
 
-        result = result and inside;
+        const on_plane = std.math.approxEqAbs(f32, pt_offset, 0.0, eps);
+        // The plane halfspaces that construct a solid shape define the solid
+        // portion as being 'in front of the plane' rather than behind
+        const within_volume = pt_offset > 0.0;
+
+        result = result and (within_volume or on_plane);
     }
 
     return result;
@@ -85,37 +83,39 @@ fn point_from_planes(a: Plane, b: Plane, c: Plane) ?v3 {
     return numerator.div(denominator);
 }
 
+fn points_to_obj(points: []v3) void {
+    pr("o Points\n", .{});
+    for (points) |pt| pr("v {d:.1} {d:.1} {d:.1}\n", .{ pt.x, pt.y, pt.z });
+}
+
 fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
     // const points = try std.ArrayListUnmanaged(f32).initCapacity(al, 1024);
     // const eps = std.math.floatEps(f32);
+    var points = try std.ArrayListUnmanaged(v3).initCapacity(al, 1024);
     const norms: std.AutoHashMapUnmanaged(usize, v3) = .empty;
     _ = norms;
 
     for (map.entities) |ent| {
         brush: for (ent.brushes, 0..) |brush, brush_i| {
-            pr("Brush {}:\n", .{brush_i});
-
             const planes = try planes_from_brushplanes(al, brush.planes);
+
             if (planes.len < 3) {
                 pr("Invalid brush (too few planes): {}", .{brush_i});
                 break :brush;
             }
 
-            pr(" Points:\n", .{});
             for (0..planes.len - 2) |i| {
                 for (i + 1..planes.len) |j| {
                     for (j + 1..planes.len) |k| {
-                        pr("{} {} {}\n", .{ i, j, k });
-
                         const a = planes[i];
                         const b = planes[j];
                         const c = planes[k];
-                        const pt = point_from_planes(a, b, c) orelse {
-                            pr("Invalid point\n", .{});
-                            continue;
-                        };
+                        const pt = point_from_planes(a, b, c) orelse continue;
 
-                        _ = point_in_planes(pt, planes);
+                        // TODO: Maybe we just need to check if point is in
+                        // [a, b, c] only?
+                        if (!point_in_planes(pt, planes)) continue;
+                        try points.append(al, pt);
                     }
                 }
             }
@@ -124,6 +124,8 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
             // for (planes) |pl| pr("  {}\n", .{pl});
         }
     }
+
+    points_to_obj(points.items);
 
     // for (map.entities) |ent| {
     //     for (ent.brushes) |brush| {
@@ -172,20 +174,18 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
     //     }
     // }
 
-    return error.NotYet;
-
-    // return .{
-    //     .points = &.{},
-    //     .faces = &.{},
-    //     .normals = &.{},
-    // };
+    return .{
+        .points = &.{},
+        .faces = &.{},
+        .normals = &.{},
+    };
 }
 
 pub fn compile(al: std.mem.Allocator, map: Map) !Bsp {
     const data = try discretize(al, map);
     _ = data;
 
-    return error.NotYet;
+    return .{};
 }
 
 test "points in plane" {
