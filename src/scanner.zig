@@ -105,6 +105,7 @@ const State = enum {
     string,
     ident,
     number,
+    number_or_float,
     sym,
     end,
 };
@@ -134,7 +135,7 @@ const Scanner = struct {
 
     pub fn peek_offset(self: *const Scanner, offset: usize) ?u8 {
         if (self.buf.len == 0) return null;
-        if (self.buf.len < offset) return null;
+        if (self.buf.len <= offset) return null;
 
         return self.buf[offset];
     }
@@ -205,17 +206,21 @@ pub fn scan_buf(
                                 _ = scanner.pop();
                             }
                         },
-                        '0'...'9' => continue :state .number,
+                        '0'...'9' => continue :state .number_or_float,
                         '.' => {
                             const nexttk = scanner.peek() orelse 0;
-                            if (isdigit(nexttk)) continue :state .number;
+                            if (isdigit(nexttk)) {
+                                continue :state .number_or_float;
+                            }
                         },
                         '-' => {
                             const nexttk = scanner.peek() orelse 0;
                             const nextnexttk = scanner.peek_offset(1) orelse 0;
-                            if (isdigit(nexttk)) continue :state .number;
+                            if (isdigit(nexttk)) {
+                                continue :state .number_or_float;
+                            }
                             if (nexttk == '.' and isdigit(nextnexttk)) {
-                                continue :state .number;
+                                continue :state .number_or_float;
                             }
                         },
                         else => {},
@@ -255,7 +260,25 @@ pub fn scan_buf(
             continue :state .readchar;
         },
 
+        // .only_number => {
+        //     continue :state .readchar;
+        // },
+
         .number => {
+            while (scanner.peek()) |ch| {
+                if (!isdigit(ch)) break;
+            }
+
+            try tokens.append(al, .{ .number = try std.fmt.parseInt(
+                i32,
+                scanner.slice(curpos, scanner.pos()),
+                10,
+            ) });
+
+            continue :state .readchar;
+        },
+
+        .number_or_float => {
             var oneperiod = curtk == '.';
             var T: TokenType = if (curtk == '.') .float else .number;
 
@@ -518,6 +541,22 @@ test "do not remove double slash comments" {
     try std.testing.expectEqual('/', tokens.items[0].sym);
     try std.testing.expectEqual('/', tokens.items[1].sym);
     try std.testing.expectEqualStrings("comment", tokens.items[2].ident);
+}
+
+test "float with exponent" {
+    const input =
+        \\1e-2
+    ;
+    const al = std.testing.allocator;
+    var tokens = try scan_buf(al, input, .{});
+    defer tokens.deinit(al);
+
+    try std.testing.expectEqual(1, tokens.items.len);
+    try std.testing.expectApproxEqAbs(
+        0.01,
+        tokens.items[0].float,
+        std.math.floatEps(f32),
+    );
 }
 
 test "expect_sym valid" {

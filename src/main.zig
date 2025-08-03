@@ -15,10 +15,11 @@ pub fn main(_: c_int, _: [*c][*c]c_char) callconv(.c) c_int {
     defer arena_allocator.deinit();
     const al = arena_allocator.allocator();
 
+    const filepath = "data/pyramid.map";
     // const filepath = "data/unnamed.map";
     // const filepath = "data/mapfile.map";
     // const filepath = "data/3cube.map";
-    const filepath = "data/cubewall.map";
+    // const filepath = "data/cubewall.map";
     var file = std.fs.cwd().openFile(
         filepath,
         .{ .mode = .read_only },
@@ -50,7 +51,7 @@ pub fn main(_: c_int, _: [*c][*c]c_char) callconv(.c) c_int {
     _ = b;
     // b.print_digraph();
 
-    _ = arena_allocator.reset(.free_all);
+    // _ = arena_allocator.reset(.free_all);
 
     return 0;
 }

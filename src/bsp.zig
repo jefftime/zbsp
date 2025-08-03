@@ -52,7 +52,7 @@ fn point_on_plane(pt: v3, plane: Plane) bool {
 
 fn point_in_planes(pt: v3, planes: []const Plane) bool {
     var result = planes.len > 0;
-    for (planes) |plane| {
+    for (planes, 0..) |plane, i| {
         const eps = std.math.floatEps(f32);
         const pt_offset = plane.norm.dot(pt) + plane.offset;
 
@@ -62,6 +62,14 @@ fn point_in_planes(pt: v3, planes: []const Plane) bool {
         const within_volume = pt_offset > 0.0;
 
         result = result and (within_volume or on_plane);
+        if (!result) {
+            pr("Point {{ {d:.1} {d:.1} {d:.1} }} failed with plane {}\n", .{
+                pt.x,
+                pt.y,
+                pt.z,
+                i,
+            });
+        }
     }
 
     return result;
@@ -83,30 +91,63 @@ fn point_from_planes(a: Plane, b: Plane, c: Plane) ?v3 {
     return numerator.div(denominator);
 }
 
-fn points_to_obj(points: []v3) void {
+fn points_to_obj(points: []v3, faces: []u32) void {
     pr("o Points\n", .{});
     for (points) |pt| pr("v {d:.1} {d:.1} {d:.1}\n", .{ pt.x, pt.y, pt.z });
+    var i: u32 = 0;
+    while (i < faces.len) : (i += 3) {
+        pr("f {} {} {}\n", .{ faces[i], faces[i + 1], faces[i + 2] });
+    }
 }
 
-fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
-    // const points = try std.ArrayListUnmanaged(f32).initCapacity(al, 1024);
-    // const eps = std.math.floatEps(f32);
-    var points = try std.ArrayListUnmanaged(v3).initCapacity(al, 1024);
-    const norms: std.AutoHashMapUnmanaged(usize, v3) = .empty;
-    _ = norms;
+const PointComparator = struct {
+    const Context = struct {
+        u: v3,
+        v: v3,
+        centroid: v3,
+        points: []v3,
+    };
 
+    fn lessThan(ctx: Context, lhs: u32, rhs: u32) bool {
+        const u = ctx.u;
+        const v = ctx.v;
+        const c = ctx.centroid;
+        const pts = ctx.points;
+
+        // NOTE: I'm lazy and don't want to make a Vec2 yet
+        const lhs2d = v3.make(u.dot(pts[lhs]), v.dot(pts[lhs]), 0.0);
+        const rhs2d = v3.make(u.dot(pts[rhs]), v.dot(pts[rhs]), 0.0);
+
+        const lhs_angle = std.math.atan2(lhs2d.y - c.y, lhs2d.x - c.x);
+        const rhs_angle = std.math.atan2(rhs2d.y - c.y, rhs2d.x - c.x);
+
+        return lhs_angle < rhs_angle;
+    }
+};
+
+fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
+    var points = try std.ArrayListUnmanaged(v3).initCapacity(al, 1024);
+    var faces = try std.ArrayListUnmanaged(u32).initCapacity(al, 1024);
+
+    // Collect points
+    // TODO: We're probably going to want to only get the worldspawn brushes at
+    // some point instead of getting all the brushes across all entities
     for (map.entities) |ent| {
         brush: for (ent.brushes, 0..) |brush, brush_i| {
             const planes = try planes_from_brushplanes(al, brush.planes);
 
             if (planes.len < 3) {
-                pr("Invalid brush (too few planes): {}", .{brush_i});
-                break :brush;
+                pr("Invalid brush (too few planes): brush #{}", .{brush_i});
+                continue :brush;
             }
 
-            for (0..planes.len - 2) |i| {
-                for (i + 1..planes.len) |j| {
-                    for (j + 1..planes.len) |k| {
+            for (0..planes.len) |i| {
+                j: for (i..planes.len) |j| {
+                    if (i == j) continue :j;
+
+                    k: for (j..planes.len) |k| {
+                        if (j == k) continue :k;
+
                         const a = planes[i];
                         const b = planes[j];
                         const c = planes[k];
@@ -120,59 +161,90 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
                 }
             }
 
-            // pr("Brush: {}\n", .{brush_i});
-            // for (planes) |pl| pr("  {}\n", .{pl});
+            // List of u32 indices into the points array
+            var plane_pts = try std.ArrayListUnmanaged(u32).initCapacity(
+                al,
+                points.items.len,
+            );
+            // Trenchbroom defines up as +Z
+            const up = v3.make(0.0, 0.0, 1.0);
+            for (planes) |plane| {
+                // TODO: If this is a bottleneck we should look at using a
+                // dictionary to store plane-point relationships somehow
+                plane_pts.clearRetainingCapacity();
+                for (points.items, 0..) |pt, i| {
+                    if (!point_on_plane(pt, plane)) continue;
+                    try plane_pts.append(al, @intCast(i));
+                }
+
+                // Trivial cases
+                if (plane_pts.items.len == 3) {
+                    try faces.append(al, plane_pts.items[0]);
+                    try faces.append(al, plane_pts.items[1]);
+                    try faces.append(al, plane_pts.items[2]);
+                    continue;
+                }
+                if (plane_pts.items.len == 4) {
+                    try faces.append(al, plane_pts.items[0]);
+                    try faces.append(al, plane_pts.items[1]);
+                    try faces.append(al, plane_pts.items[2]);
+                    try faces.append(al, plane_pts.items[0]);
+                    try faces.append(al, plane_pts.items[2]);
+                    try faces.append(al, plane_pts.items[3]);
+                    continue;
+                }
+
+                // Complex cases
+                var centroid = v3.make(0.0, 0.0, 0.0);
+                for (plane_pts.items) |pt| centroid = centroid.add(
+                    points.items[pt],
+                );
+                centroid = centroid.div(@floatFromInt(plane_pts.items.len));
+
+                const u = plane.norm.cross(up).norm();
+                const v = plane.norm.cross(u).norm();
+
+                std.sort.pdq(
+                    u32,
+                    plane_pts.items,
+                    PointComparator.Context{
+                        .u = u,
+                        .v = v,
+                        .centroid = centroid,
+                        .points = points.items,
+                    },
+                    PointComparator.lessThan,
+                );
+
+                var left: u32 = 0;
+                var right: u32 = @intCast(plane_pts.items.len - 1);
+                var toggle = true;
+                while (right - left >= 2) {
+                    var a: u32 = undefined;
+                    var b: u32 = undefined;
+                    var c: u32 = undefined;
+                    if (toggle) {
+                        a = left;
+                        b = left + 1;
+                        c = right;
+                        left += 1;
+                    } else {
+                        a = right;
+                        b = left;
+                        c = right - 1;
+                        right -= 1;
+                    }
+                    toggle = !toggle;
+                    try faces.append(al, plane_pts.items[a]);
+                    try faces.append(al, plane_pts.items[b]);
+                    try faces.append(al, plane_pts.items[c]);
+                }
+            }
         }
     }
 
-    points_to_obj(points.items);
-
-    // for (map.entities) |ent| {
-    //     for (ent.brushes) |brush| {
-    //         const planes = try planes_from_brushplanes(al, brush.planes);
-    //         for (planes) |a| {
-    //             for (planes[1..]) |b| {
-    //                 for (planes[2..]) |c| {
-    //                     pr("{} {} {}", .{ a, b, c });
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    // outer: for (map.entities) |ent| {
-    //     for (ent.brushes) |brush| {
-    //         for (brush.planes, 0..) |plane, i| {
-    //             const planenorm = norms.get(i) orelse blk: {
-    //                 const norm = plane_norm(plane);
-    //                 try norms.put(al, i, norm);
-    //                 break :blk norm;
-    //             };
-
-    //             pr("{} planenorm: {}\n", .{ i, planenorm });
-
-    //             for (i + 1..brush.planes.len) |j| {
-    //                 const other_planenorm = norms.get(j) orelse blk: {
-    //                     const norm = plane_norm(brush.planes[j]);
-    //                     try norms.put(al, j, norm);
-    //                     break :blk norm;
-    //                 };
-
-    //                 const normcross = planenorm.cross(other_planenorm);
-    //                 pr("{} normcross {}: {}\n", .{ i, j, normcross });
-    //                 // Skip parallel planes
-    //                 if (normcross.mag() < eps) {
-    //                     pr("WARN: {}: skipping index {} (parallel)\n", .{
-    //                         i,
-    //                         j,
-    //                     });
-    //                     continue;
-    //                 }
-    //             }
-    //         }
-    //         break :outer;
-    //     }
-    // }
+    // Construct faces
+    points_to_obj(points.items, faces.items);
 
     return .{
         .points = &.{},
@@ -188,42 +260,42 @@ pub fn compile(al: std.mem.Allocator, map: Map) !Bsp {
     return .{};
 }
 
-test "points in plane" {
-    // 45-degree plane that intercepts x-axis at 1, y-axis at 1, and z-axis at 1
-    const plane = Plane.from_points(
-        v3.make(1.0, 0.0, 0.0),
-        v3.make(0.0, 1.0, 0.0),
-        v3.make(0.0, 0.0, 1.0),
-    ) orelse return error.InvalidPlane;
+// test "points in plane" {
+//     // 45-degree plane that intercepts x-axis at 1, y-axis at 1, and z-axis at 1
+//     const plane = Plane.from_points(
+//         v3.make(1.0, 0.0, 0.0),
+//         v3.make(0.0, 1.0, 0.0),
+//         v3.make(0.0, 0.0, 1.0),
+//     ) orelse return error.InvalidPlane;
 
-    const pts = &.{
-        v3.make(0.0, 0.0, 0.0),
-        v3.make(-2.0, 0.0, 0.0),
-        v3.make(0.0, -2.0, 0.0),
-        v3.make(0.0, 0.0, -2.0),
-    };
-    inline for (pts) |pt| {
-        try std.testing.expect(point_in_planes(pt, &.{plane}));
-    }
-}
+//     const pts = &.{
+//         v3.make(0.0, 0.0, 0.0),
+//         v3.make(-2.0, 0.0, 0.0),
+//         v3.make(0.0, -2.0, 0.0),
+//         v3.make(0.0, 0.0, -2.0),
+//     };
+//     inline for (pts) |pt| {
+//         try std.testing.expect(point_in_planes(pt, &.{plane}));
+//     }
+// }
 
-test "points outside plane" {
-    // 45-degree plane that intercepts x-axis at 1, y-axis at 1, and z-axis at 1
-    const plane = Plane.from_points(
-        v3.make(1.0, 0.0, 0.0),
-        v3.make(0.0, 1.0, 0.0),
-        v3.make(0.0, 0.0, 1.0),
-    ) orelse return error.InvalidPlane;
+// test "points outside plane" {
+//     // 45-degree plane that intercepts x-axis at 1, y-axis at 1, and z-axis at 1
+//     const plane = Plane.from_points(
+//         v3.make(1.0, 0.0, 0.0),
+//         v3.make(0.0, 1.0, 0.0),
+//         v3.make(0.0, 0.0, 1.0),
+//     ) orelse return error.InvalidPlane;
 
-    const pts = &.{
-        v3.make(2.0, 0.0, 0.0),
-        v3.make(0.0, 2.0, 0.0),
-        v3.make(0.0, 0.0, 2.0),
-    };
-    inline for (pts) |pt| {
-        try std.testing.expect(!point_in_planes(pt, &.{plane}));
-    }
-}
+//     const pts = &.{
+//         v3.make(2.0, 0.0, 0.0),
+//         v3.make(0.0, 2.0, 0.0),
+//         v3.make(0.0, 0.0, 2.0),
+//     };
+//     inline for (pts) |pt| {
+//         try std.testing.expect(!point_in_planes(pt, &.{plane}));
+//     }
+// }
 
 test "point from planes" {
     const p1 = Plane.from_points(

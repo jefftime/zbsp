@@ -9,7 +9,7 @@ pub const Plane = struct {
         const ab = b.sub(a);
         const ac = c.sub(a);
 
-        const norm = ab.cross(ac).norm() orelse return null;
+        const norm = ab.cross(ac).norm();
 
         return .{
             .norm = norm,
@@ -41,11 +41,11 @@ pub const v3 = struct {
         return .{ .x = x, .y = y, .z = z };
     }
 
-    pub fn norm(self: v3) ?v3 {
+    pub fn norm(self: v3) v3 {
         const m = self.mag();
 
         return if (std.math.approxEqAbs(f32, m, 0.0, std.math.floatEps(f32)))
-            null
+            .{ .x = 0, .y = 0, .z = 0 }
         else
             .{ .x = self.x / m, .y = self.y / m, .z = self.z / m };
     }
@@ -163,7 +163,7 @@ test "v3 cross (coplanar points)" {
     const c = v3.make(0.0, 0.0, 1.0);
     const ab = b.sub(a);
     const ac = c.sub(a);
-    const result = ab.cross(ac).norm() orelse return error.NonCoplanarPoints;
+    const result = ab.cross(ac).norm();
     const eps = std.math.floatEps(f32);
     try std.testing.expectApproxEqAbs(0.0, result.x, eps);
     try std.testing.expectApproxEqAbs(-1.0, result.y, eps);
