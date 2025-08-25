@@ -29,6 +29,7 @@ pub const Map = struct {
 
     entities: []const Entity,
 
+    // TODO: Remove this function
     pub fn print(self: *const Map) void {
         for (self.entities, 0..) |ent, i| {
             std.log.info("Entity {}:", .{i});

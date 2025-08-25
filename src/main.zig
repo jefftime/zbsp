@@ -15,6 +15,8 @@ pub fn main(_: c_int, _: [*c][*c]c_char) callconv(.c) c_int {
     defer arena_allocator.deinit();
     const al = arena_allocator.allocator();
 
+    // const filepath = "data/octo.map";
+    // const filepath = "data/five-sides.map";
     const filepath = "data/pyramid.map";
     // const filepath = "data/unnamed.map";
     // const filepath = "data/mapfile.map";

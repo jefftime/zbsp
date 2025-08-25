@@ -104,7 +104,6 @@ const State = enum {
     skip_whitespace,
     string,
     ident,
-    number,
     number_or_float,
     sym,
     end,
@@ -260,24 +259,6 @@ pub fn scan_buf(
             continue :state .readchar;
         },
 
-        // .only_number => {
-        //     continue :state .readchar;
-        // },
-
-        .number => {
-            while (scanner.peek()) |ch| {
-                if (!isdigit(ch)) break;
-            }
-
-            try tokens.append(al, .{ .number = try std.fmt.parseInt(
-                i32,
-                scanner.slice(curpos, scanner.pos()),
-                10,
-            ) });
-
-            continue :state .readchar;
-        },
-
         .number_or_float => {
             var oneperiod = curtk == '.';
             var T: TokenType = if (curtk == '.') .float else .number;
@@ -292,6 +273,17 @@ pub fn scan_buf(
                 }
 
                 _ = scanner.pop();
+            }
+
+            // Check for exponentiation
+            if (scanner.peek() orelse 0 == 'e') {
+                T = .float;
+                _ = scanner.pop(); // 'e'
+                if (scanner.peek() orelse 0 == '-') _ = scanner.pop();
+                exp: while (scanner.peek()) |exp_ch| {
+                    if (!(isdigit(exp_ch))) break :exp;
+                    _ = scanner.pop();
+                }
             }
 
             var result: Token = undefined;

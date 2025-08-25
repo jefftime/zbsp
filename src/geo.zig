@@ -37,6 +37,14 @@ pub const v3 = struct {
     y: f32,
     z: f32,
 
+    pub fn eq(self: v3, other: v3, eps: f32) bool {
+        const x = std.math.approxEqAbs(f32, self.x, other.x, eps);
+        const y = std.math.approxEqAbs(f32, self.y, other.y, eps);
+        const z = std.math.approxEqAbs(f32, self.z, other.z, eps);
+
+        return x and y and z;
+    }
+
     pub fn make(x: f32, y: f32, z: f32) v3 {
         return .{ .x = x, .y = y, .z = z };
     }
