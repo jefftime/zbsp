@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub fn streq(str1: []const u8, str2: []const u8) bool {
+    return std.mem.eql(u8, str1, str2);
+}
+
 fn quit(err: ?anyerror) noreturn {
     std.process.exit(if (err) |e| @intCast(@intFromError(e)) else 1);
 }

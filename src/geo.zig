@@ -2,6 +2,8 @@ const std = @import("std");
 
 pub const Plane = struct {
     norm: v3,
+    u: v3 = v3.zero(),
+    v: v3 = v3.zero(),
     // We use the general/graphics form of nx + d = 0
     offset: f32,
 
@@ -14,6 +16,8 @@ pub const Plane = struct {
         return .{
             .norm = norm,
             .offset = -norm.dot(a),
+            .u = v3.zero(),
+            .v = v3.zero(),
         };
     }
 };
@@ -36,6 +40,10 @@ pub const v3 = struct {
     x: f32,
     y: f32,
     z: f32,
+
+    pub fn zero() v3 {
+        return .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    }
 
     pub fn eq(self: v3, other: v3, eps: f32) bool {
         const x = std.math.approxEqAbs(f32, self.x, other.x, eps);
