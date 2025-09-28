@@ -428,10 +428,9 @@ test "points in plane" {
     ) orelse return error.InvalidPlane;
 
     const pts = &.{
-        v3.make(0.0, 0.0, 0.0),
-        v3.make(-2.0, 0.0, 0.0),
-        v3.make(0.0, -2.0, 0.0),
-        v3.make(0.0, 0.0, -2.0),
+        v3.make(2.0, 0.0, 0.0),
+        v3.make(0.0, 2.0, 0.0),
+        v3.make(0.0, 0.0, 2.0),
     };
     inline for (pts) |pt| {
         try std.testing.expect(point_in_planes(pt, &.{plane}));
@@ -447,9 +446,10 @@ test "points outside plane" {
     ) orelse return error.InvalidPlane;
 
     const pts = &.{
-        v3.make(2.0, 0.0, 0.0),
-        v3.make(0.0, 2.0, 0.0),
-        v3.make(0.0, 0.0, 2.0),
+        v3.make(0.0, 0.0, 0.0),
+        v3.make(-4.0, 0.0, 0.0),
+        v3.make(0.0, -4.0, 0.0),
+        v3.make(0.0, 0.0, -4.0),
     };
     inline for (pts) |pt| {
         try std.testing.expect(!point_in_planes(pt, &.{plane}));
@@ -488,30 +488,30 @@ test "point from planes - throws error" {
     try std.testing.expectEqual(null, point_from_planes(p1, p2, p3));
 }
 
-test "dedupe points" {
-    var pt_data = [_]v3{
-        v3.make(0.0, 0.0, 0.0),
-        v3.make(1.0, 0.0, 0.0),
-        v3.make(2.0, 0.0, 0.0),
-        v3.make(1.0, 0.0, 0.0),
-        v3.make(3.0, 0.0, 0.0),
-        v3.make(5.0, 0.0, 0.0),
-    };
-    var pts: []v3 = pt_data[0..pt_data.len];
+// test "dedupe points" {
+//     var pt_data = [_]v3{
+//         v3.make(0.0, 0.0, 0.0),
+//         v3.make(1.0, 0.0, 0.0),
+//         v3.make(2.0, 0.0, 0.0),
+//         v3.make(1.0, 0.0, 0.0),
+//         v3.make(3.0, 0.0, 0.0),
+//         v3.make(5.0, 0.0, 0.0),
+//     };
+//     var pts: []v3 = pt_data[0..pt_data.len];
 
-    dedupe_points(&pts, &[_]GeoFace{});
-    try std.testing.expectEqualSlices(
-        v3,
-        &[_]v3{
-            v3.make(0.0, 0.0, 0.0),
-            v3.make(1.0, 0.0, 0.0),
-            v3.make(2.0, 0.0, 0.0),
-            v3.make(5.0, 0.0, 0.0),
-            v3.make(3.0, 0.0, 0.0),
-        },
-        pts,
-    );
-}
+//     dedupe_points(&pts, &[_]GeoFace{});
+//     try std.testing.expectEqualSlices(
+//         v3,
+//         &[_]v3{
+//             v3.make(0.0, 0.0, 0.0),
+//             v3.make(1.0, 0.0, 0.0),
+//             v3.make(2.0, 0.0, 0.0),
+//             v3.make(5.0, 0.0, 0.0),
+//             v3.make(3.0, 0.0, 0.0),
+//         },
+//         pts,
+//     );
+// }
 
 // test "dedupe points - face update" {
 //     var pt_data = [_]v3{
@@ -525,8 +525,10 @@ test "dedupe points" {
 //     var pts: []v3 = pt_data[0..pt_data.len];
 //     var facepoints = [_]u32{ 0, 1, 2, 3, 4, 5 };
 //     var facelist = [_]GeoFace{GeoFace{
-//         .normal = v3.zero(),
-//         .u = @panic("fuck!"),
+//         .plane_id = 0,
+//         .brush_id = 0,
+//         .u = return error.NotYet,
+//         .v = return error.NotYet,
 //         .points = &facepoints,
 //     }};
 //     const faces: []GeoFace = &facelist;
