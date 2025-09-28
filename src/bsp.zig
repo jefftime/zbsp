@@ -27,18 +27,18 @@ pub const Bsp = struct {
 const GeoData = struct {
     planes: []Plane,
     points: []v3,
-    faces: []GeoFace,
+    faces: []Face,
 };
 
-const GeoFace = struct {
+const Face = struct {
     u: v3,
     v: v3,
     plane_id: u32,
     brush_id: u32,
     point_ids: []u32,
-    points: []v3,
+    // points: []v3,
 
-    pub fn sort_points(self: *GeoFace) void {
+    pub fn sort_points(self: *Face, points: []v3) void {
         const PointComparator = struct {
             const Context = struct {
                 u: v3,
@@ -62,9 +62,9 @@ const GeoFace = struct {
             }
         };
 
-        var centroid = self.points[self.point_ids[0]];
+        var centroid = points[self.point_ids[0]];
         for (self.point_ids[1..]) |pt_id| {
-            centroid = centroid.add(self.points[pt_id]);
+            centroid = centroid.add(points[pt_id]);
         }
         centroid = centroid.div(@floatFromInt(self.point_ids.len));
 
@@ -75,7 +75,7 @@ const GeoFace = struct {
                 .u = self.u,
                 .v = self.v,
                 .centroid = centroid,
-                .points = self.points,
+                .points = points,
             },
             PointComparator.less_than,
         );
@@ -155,7 +155,7 @@ fn points_to_obj(name: []const u8, points: []v3, faces: []u32) void {
     }
 }
 
-fn dedupe_points(points: *[]v3, faces: []GeoFace) void {
+fn dedupe_points(points: *[]v3, faces: *[]Face) void {
     if (points.len == 0) return;
 
     // Index of the last element
@@ -168,7 +168,7 @@ fn dedupe_points(points: *[]v3, faces: []GeoFace) void {
 
             // TODO: Probably put all the point replacements in a HashMap and
             // iterate over faces a single time
-            for (faces) |*face| {
+            for (faces.*) |*face| {
                 for (face.*.point_ids) |*pt_id| {
                     if (pt_id.* == @as(u32, @intCast(j))) {
                         pt_id.* = @as(u32, @intCast(i));
@@ -197,7 +197,7 @@ fn dedupe_points(points: *[]v3, faces: []GeoFace) void {
 }
 
 fn triangulate(al: std.mem.Allocator, data: *GeoData) !void {
-    var newfaces = try std.ArrayListUnmanaged(GeoFace).initCapacity(
+    var newfaces = try std.ArrayListUnmanaged(Face).initCapacity(
         al,
         data.faces.len * 2,
     );
@@ -305,7 +305,7 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
     const npoints = nplanes * 4;
     var points = try std.ArrayListUnmanaged(v3).initCapacity(al, npoints);
     var planes = try std.ArrayListUnmanaged(Plane).initCapacity(al, nplanes);
-    var faces = try std.ArrayListUnmanaged(GeoFace).initCapacity(al, nplanes);
+    var faces = try std.ArrayListUnmanaged(Face).initCapacity(al, nplanes);
 
     brush: for (worldspawn.brushes, 0..) |brush, brush_id| {
         // TODO: Maybe don't fail here
@@ -338,12 +338,11 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
             const facepoints = points.items[start..];
             if (facepoints.len < 3) continue;
 
-            var newface = GeoFace{
+            var newface = Face{
                 .u = newplanes[plane_id].u,
                 .v = newplanes[plane_id].v,
                 .plane_id = @intCast(plane_id),
                 .brush_id = @intCast(brush_id),
-                .points = points.items,
                 .point_ids = try al.alloc(u32, facepoints.len),
             };
 
@@ -351,7 +350,7 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
                 pt.* = @intCast(start + pt_id);
             }
 
-            newface.sort_points();
+            newface.sort_points(points.items);
             try faces.append(al, newface);
         }
 
@@ -361,7 +360,7 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
     return .{
         .planes = planes.items,
         .points = points.items,
-        .faces = &[_]GeoFace{},
+        .faces = &[_]Face{},
     };
 }
 
@@ -370,7 +369,7 @@ fn will_split(_: Plane, _: []u32) bool {
 }
 
 // Returns 0 for non-coplanar, 1 for same normal dir, -1 for opposite normal dir
-fn coplanarity(_: Plane, _: GeoFace) i32 {
+fn coplanarity(_: Plane, _: Face) i32 {
     return 0;
 }
 
@@ -488,66 +487,67 @@ test "point from planes - throws error" {
     try std.testing.expectEqual(null, point_from_planes(p1, p2, p3));
 }
 
-// test "dedupe points" {
-//     var pt_data = [_]v3{
-//         v3.make(0.0, 0.0, 0.0),
-//         v3.make(1.0, 0.0, 0.0),
-//         v3.make(2.0, 0.0, 0.0),
-//         v3.make(1.0, 0.0, 0.0),
-//         v3.make(3.0, 0.0, 0.0),
-//         v3.make(5.0, 0.0, 0.0),
-//     };
-//     var pts: []v3 = pt_data[0..pt_data.len];
+test "dedupe points" {
+    var pt_data = [_]v3{
+        v3.make(0.0, 0.0, 0.0),
+        v3.make(1.0, 0.0, 0.0),
+        v3.make(2.0, 0.0, 0.0),
+        v3.make(1.0, 0.0, 0.0),
+        v3.make(3.0, 0.0, 0.0),
+        v3.make(5.0, 0.0, 0.0),
+    };
+    var pts: []v3 = pt_data[0..pt_data.len];
 
-//     dedupe_points(&pts, &[_]GeoFace{});
-//     try std.testing.expectEqualSlices(
-//         v3,
-//         &[_]v3{
-//             v3.make(0.0, 0.0, 0.0),
-//             v3.make(1.0, 0.0, 0.0),
-//             v3.make(2.0, 0.0, 0.0),
-//             v3.make(5.0, 0.0, 0.0),
-//             v3.make(3.0, 0.0, 0.0),
-//         },
-//         pts,
-//     );
-// }
+    var empty_faces: []Face = &[_]Face{};
+    dedupe_points(&pts, &empty_faces);
+    try std.testing.expectEqualSlices(
+        v3,
+        &[_]v3{
+            v3.make(0.0, 0.0, 0.0),
+            v3.make(1.0, 0.0, 0.0),
+            v3.make(2.0, 0.0, 0.0),
+            v3.make(5.0, 0.0, 0.0),
+            v3.make(3.0, 0.0, 0.0),
+        },
+        pts,
+    );
+}
 
-// test "dedupe points - face update" {
-//     var pt_data = [_]v3{
-//         v3.make(0.0, 0.0, 0.0),
-//         v3.make(1.0, 0.0, 0.0),
-//         v3.make(2.0, 0.0, 0.0),
-//         v3.make(1.0, 0.0, 0.0),
-//         v3.make(3.0, 0.0, 0.0),
-//         v3.make(5.0, 0.0, 0.0),
-//     };
-//     var pts: []v3 = pt_data[0..pt_data.len];
-//     var facepoints = [_]u32{ 0, 1, 2, 3, 4, 5 };
-//     var facelist = [_]GeoFace{GeoFace{
-//         .plane_id = 0,
-//         .brush_id = 0,
-//         .u = return error.NotYet,
-//         .v = return error.NotYet,
-//         .points = &facepoints,
-//     }};
-//     const faces: []GeoFace = &facelist;
+test "dedupe points - face update" {
+    var pt_data = [_]v3{
+        v3.make(0.0, 0.0, 0.0),
+        v3.make(1.0, 0.0, 0.0),
+        v3.make(2.0, 0.0, 0.0),
+        v3.make(1.0, 0.0, 0.0),
+        v3.make(3.0, 0.0, 0.0),
+        v3.make(5.0, 0.0, 0.0),
+    };
+    var pts: []v3 = pt_data[0..];
+    var facepoints = [_]u32{ 0, 1, 2, 3, 4, 5 };
+    var facelist = [_]Face{Face{
+        .plane_id = 0,
+        .brush_id = 0,
+        .u = undefined,
+        .v = undefined,
+        .point_ids = facepoints[0..],
+    }};
+    var faces: []Face = facelist[0..];
 
-//     dedupe_points(&pts, faces);
-//     try std.testing.expectEqualSlices(
-//         v3,
-//         &[_]v3{
-//             v3.make(0.0, 0.0, 0.0),
-//             v3.make(1.0, 0.0, 0.0),
-//             v3.make(2.0, 0.0, 0.0),
-//             v3.make(5.0, 0.0, 0.0),
-//             v3.make(3.0, 0.0, 0.0),
-//         },
-//         pts,
-//     );
-//     try std.testing.expectEqualSlices(
-//         u32,
-//         &[_]u32{ 0, 1, 2, 1, 4, 3 },
-//         faces[0].points,
-//     );
-// }
+    dedupe_points(&pts, &faces);
+    try std.testing.expectEqualSlices(
+        v3,
+        &[_]v3{
+            v3.make(0.0, 0.0, 0.0),
+            v3.make(1.0, 0.0, 0.0),
+            v3.make(2.0, 0.0, 0.0),
+            v3.make(5.0, 0.0, 0.0),
+            v3.make(3.0, 0.0, 0.0),
+        },
+        pts,
+    );
+    try std.testing.expectEqualSlices(
+        u32,
+        &[_]u32{ 0, 1, 2, 1, 4, 3 },
+        faces[0].point_ids,
+    );
+}
