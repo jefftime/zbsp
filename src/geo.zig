@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const Plane = struct {
-    norm: v3,
+    normal: v3,
     u: v3 = v3.zero(),
     v: v3 = v3.zero(),
     // We use the general/graphics form of nx + d = 0
@@ -11,11 +11,11 @@ pub const Plane = struct {
         const ab = b.sub(a);
         const ac = c.sub(a);
 
-        const norm = ab.cross(ac).norm();
+        const normal = ab.cross(ac).normal();
 
         return .{
-            .norm = norm,
-            .offset = -norm.dot(a),
+            .normal = normal,
+            .offset = -normal.dot(a),
             .u = v3.zero(),
             .v = v3.zero(),
         };
@@ -30,9 +30,9 @@ test "plane from points" {
     ) orelse return error.InvalidPlane;
     const eps = std.math.floatEps(f32);
 
-    try std.testing.expectApproxEqAbs(plane.norm.x, 1.0 / @sqrt(3.0), eps);
-    try std.testing.expectApproxEqAbs(plane.norm.y, 1.0 / @sqrt(3.0), eps);
-    try std.testing.expectApproxEqAbs(plane.norm.z, 1.0 / @sqrt(3.0), eps);
+    try std.testing.expectApproxEqAbs(plane.normal.x, 1.0 / @sqrt(3.0), eps);
+    try std.testing.expectApproxEqAbs(plane.normal.y, 1.0 / @sqrt(3.0), eps);
+    try std.testing.expectApproxEqAbs(plane.normal.z, 1.0 / @sqrt(3.0), eps);
     try std.testing.expectApproxEqAbs(plane.offset, -1.0 / @sqrt(3.0), eps);
 }
 
@@ -43,6 +43,17 @@ pub const v3 = struct {
 
     pub fn zero() v3 {
         return .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    }
+
+    // Returns null if less than three points
+    pub fn from_points(points: []const v3) ?v3 {
+        if (points.len < 3) return null;
+
+        const p0 = points[0];
+        const p1 = points[1];
+        const p2 = points[2];
+
+        return p1.sub(p0).cross(p2.sub(p0));
     }
 
     pub fn eq(self: v3, other: v3, eps: f32) bool {
@@ -57,7 +68,7 @@ pub const v3 = struct {
         return .{ .x = x, .y = y, .z = z };
     }
 
-    pub fn norm(self: v3) v3 {
+    pub fn normal(self: v3) v3 {
         const m = self.mag();
 
         return if (std.math.approxEqAbs(f32, m, 0.0, std.math.floatEps(f32)))
@@ -179,7 +190,7 @@ test "v3 cross (coplanar points)" {
     const c = v3.make(0.0, 0.0, 1.0);
     const ab = b.sub(a);
     const ac = c.sub(a);
-    const result = ab.cross(ac).norm();
+    const result = ab.cross(ac).normal();
     const eps = std.math.floatEps(f32);
     try std.testing.expectApproxEqAbs(0.0, result.x, eps);
     try std.testing.expectApproxEqAbs(-1.0, result.y, eps);
@@ -202,4 +213,18 @@ test "v3 dot 2" {
 
     const eps = std.math.floatEps(f32);
     try std.testing.expectApproxEqAbs(6, result, eps);
+}
+
+test "v3 from points" {
+    const a = v3.make(1, 0, 0);
+    const b = v3.make(0, 1, 0);
+    const c = v3.make(0, 0, 0);
+
+    const result = v3.from_points(
+        &[_]v3{ a, b, c },
+    ) orelse @panic("Invalid vector");
+    const eps = std.math.floatEps(f32);
+    try std.testing.expectApproxEqAbs(0.0, result.x, eps);
+    try std.testing.expectApproxEqAbs(0.0, result.y, eps);
+    try std.testing.expectApproxEqAbs(1.0, result.z, eps);
 }
