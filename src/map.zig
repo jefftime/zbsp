@@ -70,7 +70,7 @@ pub fn parse(al: std.mem.Allocator, tokens: []scanner.Token) !Map {
     while (tks.peek() != null) try entities.append(al, try entity(al, &tks));
 
     entities.shrinkAndFree(al, entities.items.len);
-    return .{ .entities = entities.items };
+    return .{ .entities = try entities.toOwnedSlice(al) };
 }
 
 fn entity(
@@ -107,7 +107,10 @@ fn entity(
         else => return error.InvalidToken,
     };
 
-    return .{ .properties = properties.items, .brushes = brushes.items };
+    return .{
+        .properties = try properties.toOwnedSlice(al),
+        .brushes = try brushes.toOwnedSlice(al),
+    };
 }
 
 fn brush(
@@ -132,8 +135,7 @@ fn brush(
         else => return error.InvalidToken,
     }
 
-    planes.shrinkAndFree(al, planes.items.len);
-    return .{ .planes = planes.items };
+    return .{ .planes = try planes.toOwnedSlice(al) };
 }
 
 fn float_or_number(tks: *scanner.TokenScanner) !f32 {
@@ -223,6 +225,5 @@ fn path(al: std.mem.Allocator, tks: *scanner.TokenScanner) ![]const u8 {
         else => break :tk,
     }
 
-    pathstr.shrinkAndFree(al, pathstr.items.len);
-    return pathstr.items;
+    return try pathstr.toOwnedSlice(al);
 }

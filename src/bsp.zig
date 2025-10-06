@@ -25,9 +25,22 @@ pub const Bsp = struct {
 };
 
 const GeoData = struct {
+    name: []const u8 = "Map",
     planes: []Plane,
     points: []v3,
     faces: []Face,
+
+    pub fn to_obj(self: *const GeoData) void {
+        pr("o {s}\n", .{self.name});
+        for (self.points) |pt| pr("v {d:.1} {d:.1} {d:.1}\n", .{
+            pt.x, pt.y, pt.z,
+        });
+        for (self.faces) |face| {
+            pr("f ", .{});
+            for (face.point_ids) |pt| pr("{} ", .{pt + 1});
+            pr("\n", .{});
+        }
+    }
 };
 
 const Face = struct {
@@ -96,7 +109,7 @@ fn planes_from_brushplanes(al: std.mem.Allocator, bps: []Map.Plane) ![]Plane {
         try planes.append(al, plane);
     }
 
-    return planes.items;
+    return try planes.toOwnedSlice(al);
 }
 
 fn point_on_plane(pt: v3, plane: Plane) bool {
@@ -141,20 +154,6 @@ fn point_from_planes(a: Plane, b: Plane, c: Plane) ?v3 {
     return numerator.div(denominator);
 }
 
-fn points_to_obj(name: []const u8, points: []v3, faces: []u32) void {
-    pr("o {s}\n", .{name});
-    for (points) |pt| pr("v {d:.1} {d:.1} {d:.1}\n", .{ pt.x, pt.y, pt.z });
-    var i: u32 = 0;
-    while (i < faces.len) : (i += 3) {
-        // Obj face indices start at 1
-        pr("f {} {} {}\n", .{
-            faces[i] + 1,
-            faces[i + 1] + 1,
-            faces[i + 2] + 1,
-        });
-    }
-}
-
 fn dedupe_points(points: *[]v3, faces: *[]Face) void {
     if (points.len == 0) return;
 
@@ -197,65 +196,29 @@ fn dedupe_points(points: *[]v3, faces: *[]Face) void {
 }
 
 fn triangulate(al: std.mem.Allocator, data: *GeoData) !void {
-    var newfaces = try std.ArrayListUnmanaged(Face).initCapacity(
-        al,
-        data.faces.len * 2,
-    );
+    var newfaces = std.ArrayListUnmanaged(Face).fromOwnedSlice(data.faces);
+    try newfaces.ensureTotalCapacity(al, newfaces.items.len * 2);
 
-    var plane_pts = try std.ArrayListUnmanaged(u32).initCapacity(al, 128);
-    for (0..data.planes.len) |plane_id| {
-        // TODO: If this is a bottleneck we should look at using a
-        // dictionary to store plane-point relationships somehow
-        plane_pts.clearRetainingCapacity();
-        for (data.points, 0..) |pt, i| {
-            if (!point_on_plane(pt, data.planes[plane_id])) continue;
-            try plane_pts.append(al, @intCast(i));
+    const newfacelen = newfaces.items.len;
+    face: for (0..newfacelen) |i| {
+        if (newfaces.items[i].point_ids.len == 3) continue :face;
+        if (newfaces.items[i].point_ids.len == 4) {
+            var newpoint = try al.alloc(u32, 3);
+            newpoint[0] = newfaces.items[i].point_ids[0];
+            newpoint[1] = newfaces.items[i].point_ids[2];
+            newpoint[2] = newfaces.items[i].point_ids[3];
+            newfaces.items[i].point_ids = newfaces.items[i].point_ids[0..3];
+            continue :face;
         }
 
-        if (plane_pts.items.len == 3) {
-            const normal = v3.from_points(&[_]v3{
-                data.points[plane_pts.items[0]],
-                data.points[plane_pts.items[1]],
-                data.points[plane_pts.items[2]],
-            }) orelse return error.TriangulateInvalidPlanePoints;
-            var points = al.alloc(u32, 3);
-            points[0] = plane_pts.items[0];
-            points[1] = plane_pts.items[1];
-            points[2] = plane_pts.items[2];
-            try newfaces.append(al, .{ .normal = normal, .points = points });
-        }
+        const ntris = newfaces.items[i].point_ids.len - 2;
+        var newpoints = try al.alloc(u32, ntris * 3);
 
-        if (plane_pts.items.len == 4) {
-            const normal = v3.from_points(&[_]v3{
-                data.points[plane_pts.items[0]],
-                data.points[plane_pts.items[1]],
-                data.points[plane_pts.items[2]],
-            }) orelse return error.TriangulateInvalidPlanePoints;
-            var points = al.alloc(u32, 3);
-            points[0] = plane_pts.items[0];
-            points[1] = plane_pts.items[1];
-            points[2] = plane_pts.items[2];
-            try newfaces.append(al, .{ .normal = normal, .points = points });
-            points = al.alloc(u32, 3);
-            points[0] = plane_pts.items[0];
-            points[2] = plane_pts.items[2];
-            points[3] = plane_pts.items[3];
-            try newfaces.append(al, .{ .normal = normal, .points = points });
-        }
-
-        // Quads are trivial
-        if (plane_pts.items.len == 4) {
-            try newfaces.append(al, plane_pts.items[0]);
-            try newfaces.append(al, plane_pts.items[1]);
-            try newfaces.append(al, plane_pts.items[2]);
-            try newfaces.append(al, plane_pts.items[0]);
-            try newfaces.append(al, plane_pts.items[2]);
-            try newfaces.append(al, plane_pts.items[3]);
-            continue;
-        }
-
+        // This will create a triangle span instead of fan. It assembles it by
+        // switching between making a triangle from the front, then the back,
+        // etc and removing a point from the list each time
         var start: u32 = 0;
-        var end: u32 = @intCast(plane_pts.items.len - 1);
+        var end: u32 = @intCast(newfaces.items[i].point_ids.len - 1);
         var toggle = true;
         while (end - start >= 2) {
             var a: u32 = undefined;
@@ -273,13 +236,22 @@ fn triangulate(al: std.mem.Allocator, data: *GeoData) !void {
                 end -= 1;
             }
             toggle = !toggle;
-            try newfaces.append(al, plane_pts.items[a]);
-            try newfaces.append(al, plane_pts.items[b]);
-            try newfaces.append(al, plane_pts.items[c]);
+
+            newpoints[0] = newfaces.items[i].point_ids[a];
+            newpoints[1] = newfaces.items[i].point_ids[b];
+            newpoints[2] = newfaces.items[i].point_ids[c];
+
+            try newfaces.append(al, .{
+                .brush_id = newfaces.items[i].brush_id,
+                .plane_id = newfaces.items[i].plane_id,
+                .u = newfaces.items[i].u,
+                .v = newfaces.items[i].v,
+                .point_ids = newpoints[0..3],
+            });
+
+            newpoints = newpoints[3..];
         }
     }
-
-    data.faces = newfaces.items;
 }
 
 // Returns list of n-gon faces
@@ -301,55 +273,81 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
     };
 
     // Assume most brushes will be rectanguloids of some sort
-    const nplanes = worldspawn.brushes.len * 6;
-    const npoints = nplanes * 4;
-    var points = try std.ArrayListUnmanaged(v3).initCapacity(al, npoints);
-    var planes = try std.ArrayListUnmanaged(Plane).initCapacity(al, nplanes);
-    var faces = try std.ArrayListUnmanaged(Face).initCapacity(al, nplanes);
+    const planecount = worldspawn.brushes.len * 6;
+    const pointcount = (planecount * 4) * 12 / 10; // 1.2x for a little leeway
+    var points = try std.ArrayListUnmanaged(v3).initCapacity(
+        al,
+        pointcount,
+    );
+    var planes = try std.ArrayListUnmanaged(Plane).initCapacity(al, planecount);
+    var faces = try std.ArrayListUnmanaged(Face).initCapacity(al, planecount);
 
     brush: for (worldspawn.brushes, 0..) |brush, brush_id| {
-        // TODO: Maybe don't fail here
-        const newplanes = try planes_from_brushplanes(al, brush.planes);
+        // Key is an index into the points array, value is the three faces from
+        // the plane intersection formula
+        //
+        // K - point_id
+        // V - { newplane_id, newplane_id, newplane_id }
+        var plane_points: std.AutoHashMapUnmanaged(u32, [3]u32) = .empty;
+        defer plane_points.deinit(al);
+
+        const newplanes = planes_from_brushplanes(al, brush.planes) catch {
+            continue :brush;
+        };
 
         if (newplanes.len < 3) {
             pr("Invalid brush (too few planes): brush #{}", .{brush_id});
             continue :brush;
         }
 
-        for (0..newplanes.len) |plane_id| {
-            const start = points.items.len;
-
-            i: for (plane_id..newplanes.len) |i| {
-                if (plane_id == i) continue :i;
+        // Build up the points
+        for (0..newplanes.len) |newplane_id| {
+            i: for (newplane_id..newplanes.len) |i| {
+                if (newplane_id == i) continue :i;
 
                 j: for (i..newplanes.len) |j| {
                     if (i == j) continue :j;
 
-                    const a = newplanes[plane_id];
+                    const a = newplanes[newplane_id];
                     const b = newplanes[i];
                     const c = newplanes[j];
                     const pt = point_from_planes(a, b, c) orelse continue :j;
 
                     if (!point_in_planes(pt, newplanes)) continue :j;
+                    const curpoint: u32 = @intCast(points.items.len);
                     try points.append(al, pt);
+                    try plane_points.put(
+                        al,
+                        curpoint,
+                        .{ @intCast(newplane_id), @intCast(i), @intCast(j) },
+                    );
                 }
             }
+        }
 
-            const facepoints = points.items[start..];
-            if (facepoints.len < 3) continue;
+        for (newplanes, 0..) |newplane, newplane_id| {
+            var facepoints = try std.ArrayListUnmanaged(u32).initCapacity(
+                al,
+                plane_points.size,
+            );
+            var pt_iter = plane_points.iterator();
+            pt: while (pt_iter.next()) |pt| {
+                const is_first = newplane_id == pt.value_ptr.*[0];
+                const is_second = newplane_id == pt.value_ptr.*[1];
+                const is_third = newplane_id == pt.value_ptr.*[2];
+                if (!(is_first or is_second or is_third)) continue :pt;
+
+                try facepoints.append(al, pt.key_ptr.*);
+            }
+            if (facepoints.items.len == 0) continue;
 
             var newface = Face{
-                .u = newplanes[plane_id].u,
-                .v = newplanes[plane_id].v,
-                .plane_id = @intCast(plane_id),
                 .brush_id = @intCast(brush_id),
-                .point_ids = try al.alloc(u32, facepoints.len),
+                .plane_id = @intCast(planes.items.len + newplane_id),
+                .u = newplane.u,
+                .v = newplane.v,
+                .point_ids = try facepoints.toOwnedSlice(al),
             };
-
-            for (newface.point_ids, 0..) |*pt, pt_id| {
-                pt.* = @intCast(start + pt_id);
-            }
-
             newface.sort_points(points.items);
             try faces.append(al, newface);
         }
@@ -358,9 +356,9 @@ fn discretize(al: std.mem.Allocator, map: Map) !GeoData {
     }
 
     return .{
-        .planes = planes.items,
-        .points = points.items,
-        .faces = &[_]Face{},
+        .planes = try planes.toOwnedSlice(al),
+        .points = try points.toOwnedSlice(al),
+        .faces = try faces.toOwnedSlice(al),
     };
 }
 
@@ -407,12 +405,12 @@ fn build_bsp(data: *GeoData) Bsp {
 }
 
 pub fn compile(al: std.mem.Allocator, map: Map) !Bsp {
-    _ = try discretize(al, map);
+    var data = try discretize(al, map);
 
-    // const bsp = build_bsp(&data);
-    // dedupe_points(&data.points, data.faces);
+    // _ = build_bsp(&data);
+    // dedupe_points(&data.points, &data.faces);
     // try triangulate(al, &data);
-    // points_to_obj("zbsp", data.points, data.faces);
+    data.to_obj();
 
     return .{};
     // return bsp;

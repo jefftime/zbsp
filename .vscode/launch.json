@@ -5,19 +5,20 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "gdb",
+            "type": "lldb",
             "request": "launch",
-            "name": "GDB",
+            "name": "Debug",
             "program": "${workspaceFolder}/zig-out/bin/zfp",
+            "args": [],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "Build (debug)",
-            "internalConsoleOptions": "openOnSessionStart"
+            "preLaunchTask": "Build (debug)"
         },
         {
-            "type": "gdb",
+            "type": "lldb",
             "request": "launch",
-            "name": "GDB (test)",
+            "name": "Test",
             "program": "${workspaceFolder}/zig-out/bin/test",
+            "args": [],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "Build (debug)"
         }
